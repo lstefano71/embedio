@@ -1,6 +1,7 @@
 ﻿namespace Unosquare.Labs.EmbedIO
 {
     using System.Net;
+    using System.Threading.Tasks;
 
     /// <summary>
     /// A delegate that handles certain action in a module given a path and a verb
@@ -10,6 +11,17 @@
     /// <returns></returns>
     public delegate bool ResponseHandler(WebServer server, HttpListenerContext context);
 
+    /// <summary>
+    /// An async delegate that handles certain action in a module given a path and a verb
+    /// </summary>
+    /// <param name="server">The server.</param>
+    /// <param name="context">The context.</param>
+    /// <returns></returns>
+    public delegate Task<bool> AsyncResponseHandler(WebServer server, HttpListenerContext context);
+
+    /// <summary>
+    /// Interface to create web modules
+    /// </summary>
     public interface IWebModule
     {
         /// <summary>

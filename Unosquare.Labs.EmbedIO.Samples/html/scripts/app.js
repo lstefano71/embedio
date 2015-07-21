@@ -1,5 +1,6 @@
 (function () {
     angular.module('app', [
+        'tubular.directives',
         'app.constants',
         'app.routes',
         'app.services',

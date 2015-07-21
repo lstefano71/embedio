@@ -1,9 +1,9 @@
 ﻿namespace Unosquare.Labs.EmbedIO.Samples
 {
-    using log4net;
     using System;
+    using Unosquare.Labs.EmbedIO.Log;
 
-    class Program
+    internal class Program
     {
         private static readonly ILog Log = Logger.For<Program>();
 
@@ -11,9 +11,10 @@
         /// Defines the entry point of the application.
         /// </summary>
         /// <param name="args">The arguments.</param>
-        static void Main(string[] args)
+        private static void Main(string[] args)
         {
             var url = "http://localhost:9696/";
+
             if (args.Length > 0)
                 url = args[0];
 
@@ -28,6 +29,15 @@
                 // Beware that this is an in-memory session storage mechanism so, avoid storing very large objects.
                 // You can use the server.GetSession() method to get the SessionInfo object and manupulate it.
                 server.RegisterModule(new Modules.LocalSessionModule());
+
+                // Set the CORS Rules
+                server.RegisterModule(new Modules.CorsModule(
+                    // Origins, separated by comma without last slash
+                    "http://client.cors-api.appspot.com,http://unosquare.github.io,http://run.plnkr.co", 
+                    // Allowed headers
+                    "content-type, accept",
+                    // Allowed methods
+                    "post"));
 
                 // Register the static files server. See the html folder of this project. Also notice that 
                 // the files under the html folder have Copy To Output Folder = Copy if Newer
@@ -49,8 +59,10 @@
 
                 // Fire up the browser to show the content!
 #if DEBUG
-                var browser = new System.Diagnostics.Process() { 
-                    StartInfo = new System.Diagnostics.ProcessStartInfo(url) { UseShellExecute = true } };
+                var browser = new System.Diagnostics.Process()
+                {
+                    StartInfo = new System.Diagnostics.ProcessStartInfo(url) {UseShellExecute = true}
+                };
                 browser.Start();
 #endif
                 // Wait for any key to be pressed before disposing of our web server.

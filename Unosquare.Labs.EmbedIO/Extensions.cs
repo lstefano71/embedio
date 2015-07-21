@@ -2,25 +2,20 @@
 {
     using Newtonsoft.Json;
     using System;
+    using System.Collections.Generic;
     using System.IO;
     using System.IO.Compression;
     using System.Linq;
     using System.Net;
     using System.Net.WebSockets;
+    using System.Security.Cryptography;
+    using System.Text;
 
     /// <summary>
     /// Extension methods to help your coding!
     /// </summary>
-    static public class Extensions
+    public static class Extensions
     {
-        public const string HeaderAcceptEncoding = "Accept-Encoding";
-        public const string HeaderContentEncoding = "Content-Encoding";
-        public const string HeaderIfModifiedSince = "If-Modified-Since";
-        public const string HeaderCacheControl = "Cache-Control";
-        public const string HeaderPragma = "Pragma";
-        public const string HeaderExpires = "Expires";
-        public const string HeaderLastModified = "Last-Modified";
-        public const string BrowserTimeFormat = "ddd, dd MMM yyyy HH:mm:ss 'GMT'";
 
         /// <summary>
         /// Gets the session object associated to the current context.
@@ -29,12 +24,9 @@
         /// <param name="context">The context.</param>
         /// <param name="server">The server.</param>
         /// <returns></returns>
-        static public SessionInfo GetSession(this HttpListenerContext context, WebServer server)
+        public static SessionInfo GetSession(this HttpListenerContext context, WebServer server)
         {
-            if (server.SessionModule == null)
-                return null;
-
-            return server.SessionModule.GetSession(context);
+            return server.SessionModule == null ? null : server.SessionModule.GetSession(context);
         }
 
         /// <summary>
@@ -44,12 +36,9 @@
         /// <param name="context">The context.</param>
         /// <param name="server">The server.</param>
         /// <returns></returns>
-        static public SessionInfo GetSession(this WebSocketContext context, WebServer server)
+        public static SessionInfo GetSession(this WebSocketContext context, WebServer server)
         {
-            if (server.SessionModule == null)
-                return null;
-
-            return server.SessionModule.GetSession(context);
+            return server.SessionModule == null ? null : server.SessionModule.GetSession(context);
         }
 
         /// <summary>
@@ -59,12 +48,9 @@
         /// <param name="server">The server.</param>
         /// <param name="context">The context.</param>
         /// <returns></returns>
-        static public SessionInfo GetSession(this WebServer server, HttpListenerContext context)
+        public static SessionInfo GetSession(this WebServer server, HttpListenerContext context)
         {
-            if (server.SessionModule == null)
-                return null;
-
-            return server.SessionModule.GetSession(context);
+            return server.SessionModule == null ? null : server.SessionModule.GetSession(context);
         }
 
         /// <summary>
@@ -73,12 +59,9 @@
         /// <param name="server">The server.</param>
         /// <param name="context">The context.</param>
         /// <returns></returns>
-        static public SessionInfo GetSession(this WebServer server, WebSocketContext context)
+        public static SessionInfo GetSession(this WebServer server, WebSocketContext context)
         {
-            if (server.SessionModule == null)
-                return null;
-
-            return server.SessionModule.GetSession(context);
+            return server.SessionModule == null ? null : server.SessionModule.GetSession(context);
         }
 
         /// <summary>
@@ -86,7 +69,7 @@
         /// </summary>
         /// <param name="context">The context.</param>
         /// <returns></returns>
-        static public string RequestPath(this HttpListenerContext context)
+        public static string RequestPath(this HttpListenerContext context)
         {
             return context.Request.Url.LocalPath.ToLowerInvariant();
         }
@@ -96,7 +79,7 @@
         /// </summary>
         /// <param name="ex">The ex.</param>
         /// <returns></returns>
-        static public string ExceptionMessage(this Exception ex)
+        public static string ExceptionMessage(this Exception ex)
         {
             return ex.ExceptionMessage(string.Empty);
         }
@@ -107,25 +90,26 @@
         /// <param name="ex">The ex.</param>
         /// <param name="priorMessage">The prior message.</param>
         /// <returns></returns>
-        static public string ExceptionMessage(this Exception ex, string priorMessage)
+        public static string ExceptionMessage(this Exception ex, string priorMessage)
         {
             var fullMessage = string.IsNullOrWhiteSpace(priorMessage) ? ex.Message : priorMessage + "\r\n" + ex.Message;
             if (ex.InnerException != null && string.IsNullOrWhiteSpace(ex.InnerException.Message) == false)
                 return ExceptionMessage(ex.InnerException, fullMessage);
-            else
-                return fullMessage;
+
+            return fullMessage;
         }
 
         /// <summary>
         /// Sends headers to disable caching on the client side.
         /// </summary>
         /// <param name="context">The context.</param>
-        static public void NoCache(this HttpListenerContext context)
+        public static void NoCache(this HttpListenerContext context)
         {
-            context.Response.AddHeader(HeaderExpires, "Mon, 26 Jul 1997 05:00:00 GMT");
-            context.Response.AddHeader(HeaderLastModified, DateTime.UtcNow.ToString(BrowserTimeFormat));
-            context.Response.AddHeader(HeaderCacheControl, "no-store, no-cache, must-revalidate");
-            context.Response.AddHeader(HeaderPragma, "no-cache");
+            context.Response.AddHeader(Constants.HeaderExpires, "Mon, 26 Jul 1997 05:00:00 GMT");
+            context.Response.AddHeader(Constants.HeaderLastModified,
+                DateTime.UtcNow.ToString(Constants.BrowserTimeFormat));
+            context.Response.AddHeader(Constants.HeaderCacheControl, "no-store, no-cache, must-revalidate");
+            context.Response.AddHeader(Constants.HeaderPragma, "no-cache");
         }
 
         /// <summary>
@@ -134,12 +118,9 @@
         /// <param name="context">The context.</param>
         /// <param name="key">The key.</param>
         /// <returns></returns>
-        static public string QueryString(this HttpListenerContext context, string key)
+        public static string QueryString(this HttpListenerContext context, string key)
         {
-            if (context.InQueryString(key))
-                return context.Request.QueryString[key];
-
-            return null;
+            return context.InQueryString(key) ? context.Request.QueryString[key] : null;
         }
 
         /// <summary>
@@ -148,7 +129,7 @@
         /// <param name="context">The context.</param>
         /// <param name="key">The key.</param>
         /// <returns></returns>
-        static public bool InQueryString(this HttpListenerContext context, string key)
+        public static bool InQueryString(this HttpListenerContext context, string key)
         {
             return context.Request.QueryString.AllKeys.Contains(key);
         }
@@ -158,10 +139,10 @@
         /// </summary>
         /// <param name="context">The context.</param>
         /// <returns></returns>
-        static public HttpVerbs RequestVerb(this HttpListenerContext context)
+        public static HttpVerbs RequestVerb(this HttpListenerContext context)
         {
-            var verb = HttpVerbs.Get;
-            Enum.TryParse<HttpVerbs>(context.Request.HttpMethod.ToLowerInvariant().Trim(), true, out verb);
+            HttpVerbs verb;
+            Enum.TryParse(context.Request.HttpMethod.ToLowerInvariant().Trim(), true, out verb);
             return verb;
         }
 
@@ -171,7 +152,7 @@
         /// <param name="context">The context.</param>
         /// <param name="location">The location.</param>
         /// <param name="useAbsoluteUrl">if set to <c>true</c> [use absolute URL].</param>
-        static public void Redirect(this HttpListenerContext context, string location, bool useAbsoluteUrl)
+        public static void Redirect(this HttpListenerContext context, string location, bool useAbsoluteUrl)
         {
             if (useAbsoluteUrl)
             {
@@ -188,7 +169,7 @@
         /// </summary>
         /// <param name="json">The json.</param>
         /// <returns></returns>
-        static public string PrettifyJson(this string json)
+        public static string PrettifyJson(this string json)
         {
             dynamic parsedJson = JsonConvert.DeserializeObject(json);
             return JsonConvert.SerializeObject(parsedJson, Formatting.Indented);
@@ -200,7 +181,7 @@
         /// <param name="context">The context.</param>
         /// <param name="data">The data.</param>
         /// <returns></returns>
-        static public bool JsonResponse(this HttpListenerContext context, object data)
+        public static bool JsonResponse(this HttpListenerContext context, object data)
         {
             var jsonFormatting = Formatting.None;
 #if DEBUG
@@ -216,9 +197,9 @@
         /// <param name="context">The context.</param>
         /// <param name="json">The json.</param>
         /// <returns></returns>
-        static public bool JsonResponse(this HttpListenerContext context, string json)
+        public static bool JsonResponse(this HttpListenerContext context, string json)
         {
-            var buffer = System.Text.Encoding.UTF8.GetBytes(json);
+            var buffer = Encoding.UTF8.GetBytes(json);
 
             context.Response.ContentType = "application/json";
             context.Response.OutputStream.Write(buffer, 0, buffer.Length);
@@ -232,13 +213,11 @@
         /// <typeparam name="T"></typeparam>
         /// <param name="context">The context.</param>
         /// <returns></returns>
-        static public T ParseJson<T>(this HttpListenerContext context)
+        public static T ParseJson<T>(this HttpListenerContext context)
             where T : class
         {
             var body = context.RequestBody();
-            if (body == null) return null;
-
-            return JsonConvert.DeserializeObject<T>(body);
+            return body == null ? null : JsonConvert.DeserializeObject<T>(body);
         }
 
         /// <summary>
@@ -246,14 +225,14 @@
         /// </summary>
         /// <param name="context">The context.</param>
         /// <returns></returns>
-        static public string RequestBody(this HttpListenerContext context)
+        public static string RequestBody(this HttpListenerContext context)
         {
             if (context.Request.HasEntityBody == false)
                 return null;
 
             using (var body = context.Request.InputStream) // here we have data
             {
-                using (System.IO.StreamReader reader = new System.IO.StreamReader(body, context.Request.ContentEncoding))
+                using (var reader = new StreamReader(body, context.Request.ContentEncoding))
                 {
                     return reader.ReadToEnd();
                 }
@@ -266,10 +245,9 @@
         /// <param name="context">The context.</param>
         /// <param name="headerName">Name of the header.</param>
         /// <returns></returns>
-        static public string RequestHeader(this HttpListenerContext context, string headerName)
+        public static string RequestHeader(this HttpListenerContext context, string headerName)
         {
-            if (context.HasRequestHeader(headerName) == false) return string.Empty;
-            return context.Request.Headers[headerName];
+            return context.HasRequestHeader(headerName) == false ? string.Empty : context.Request.Headers[headerName];
         }
 
         /// <summary>
@@ -278,9 +256,34 @@
         /// <param name="context">The context.</param>
         /// <param name="headerName">Name of the header.</param>
         /// <returns></returns>
-        static public bool HasRequestHeader(this HttpListenerContext context, string headerName)
+        public static bool HasRequestHeader(this HttpListenerContext context, string headerName)
         {
             return context.Request.Headers[headerName] != null;
+        }
+
+        /// <summary>
+        /// Returns dictionary from Request POST data
+        /// </summary>
+        /// <param name="context"></param>
+        /// <returns></returns>
+        public static Dictionary<string, string> RequestFormData(this HttpListenerContext context)
+        {
+            var request = context.Request;
+            if (request.HasEntityBody == false) return null;
+
+            using (var body = request.InputStream)
+            {
+                using (var reader = new StreamReader(body, request.ContentEncoding))
+                {
+                    var stringData = reader.ReadToEnd();
+
+                    if (String.IsNullOrWhiteSpace(stringData)) return null;
+
+                    return stringData.Split('&')
+                        .ToDictionary(c => c.Split('=')[0],
+                            c => Uri.UnescapeDataString(c.Split('=')[1]));
+                }
+            }
         }
 
         /// <summary>
@@ -288,10 +291,11 @@
         /// </summary>
         /// <param name="buffer">The buffer.</param>
         /// <returns></returns>
-        static public byte[] Compress(this byte[] buffer)
+        public static byte[] Compress(this byte[] buffer)
         {
-            byte[] outputBuffer = null;
-            using (MemoryStream targetStream = new MemoryStream())
+            byte[] outputBuffer;
+
+            using (var targetStream = new MemoryStream())
             {
                 using (var compressor = new GZipStream(targetStream, CompressionMode.Compress, true))
                 {
@@ -302,6 +306,34 @@
 
             return outputBuffer;
         }
-    }
 
+        /// <summary>
+        /// Hash with MD5
+        /// </summary>
+        /// <param name="inputBytes"></param>
+        /// <returns></returns>
+        public static string ComputeMd5Hash(byte[] inputBytes)
+        {
+            var hash = MD5.Create().ComputeHash(inputBytes);
+
+            var sb = new StringBuilder();
+
+            for (var i = 0; i < hash.Length; i++)
+            {
+                sb.Append(i.ToString("x2"));
+            }
+
+            return sb.ToString();
+        }
+
+        /// <summary>
+        /// Hash with MD5
+        /// </summary>
+        /// <param name="input"></param>
+        /// <returns></returns>
+        public static string ComputeMd5Hash(string input)
+        {
+            return ComputeMd5Hash(Encoding.ASCII.GetBytes(input));
+        }
+    }
 }

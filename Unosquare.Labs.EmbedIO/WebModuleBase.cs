@@ -1,11 +1,8 @@
 ﻿namespace Unosquare.Labs.EmbedIO
 {
-    using System.Collections.Generic;
-    using System.Net;
-
     /// <summary>
     /// Base class to define custom web modules
-    /// inherit from this class and use the AddHandler Method to register you method calls
+    /// inherit from this class and use the AddHandler Method to register your method calls
     /// </summary>
     public abstract class WebModuleBase : IWebModule
     {
@@ -51,9 +48,7 @@
         /// <param name="handler">The handler.</param>
         public void AddHandler(string path, HttpVerbs verb, ResponseHandler handler)
         {
-            this.Handlers[path] = new Dictionary<HttpVerbs, ResponseHandler>() { { verb, handler } };
+            this.Handlers.Add(new Map {Path = path, Verb = verb, ResponseHandler = handler});
         }
-
     }
-
 }

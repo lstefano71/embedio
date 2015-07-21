@@ -1,10 +1,13 @@
 ﻿namespace Unosquare.Labs.EmbedIO
 {
     using System;
+    using System.Collections.Concurrent;
     using System.Net;
     using System.Net.WebSockets;
-    using Unosquare.Labs.EmbedIO.Collections.Concurrent;
 
+    /// <summary>
+    /// Interface to create session modules
+    /// </summary>
     public interface ISessionWebModule : IWebModule
     {
         /// <summary>

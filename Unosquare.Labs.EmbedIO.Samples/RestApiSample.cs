@@ -4,14 +4,27 @@
     using System.Collections.Generic;
     using System.Linq;
     using System.Net;
-    using System.Security.Cryptography;
-    using System.Text;
+    using System.Threading.Tasks;
     using Unosquare.Labs.EmbedIO.Modules;
+    using Unosquare.Tubular;
+    using Unosquare.Tubular.ObjectModel;
 
-    public static partial class RestApiSample
+    public static class RestApiSample
     {
         private const string RelativePath = "/api/";
-        public static List<Person> People { get; private set; }
+
+        public static List<Person> People = new List<Person>
+        {
+            new Person() {Key = 1, Name = "Mario Di Vece", Age = 31, EmailAddress = "mario@unosquare.com"},
+            new Person() {Key = 2, Name = "Geovanni Perez", Age = 32, EmailAddress = "geovanni.perez@unosquare.com"},
+            new Person() {Key = 3, Name = "Luis Gonzalez", Age = 29, EmailAddress = "luis.gonzalez@unosquare.com"},
+        };
+
+        public static async Task<IQueryable<Person>> GetPeopleAsync()
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(300));
+            return People.AsQueryable();
+        }
 
         /// <summary>
         /// Here we add the WebApiModule to our Web Server and register our controller classes.
@@ -21,13 +34,6 @@
         /// <param name="server">The server.</param>
         public static void Setup(WebServer server)
         {
-            People = new List<Person>()
-            {
-                new Person() {Key = 1, Name = "Mario Di Vece", Age = 31, EmailAddress = "mario@unosquare.com"},
-                new Person() {Key = 2, Name = "Geovanni Perez", Age = 32, EmailAddress = "geovanni.perez@unosquare.com"},
-                new Person() {Key = 3, Name = "Luis Gonzalez", Age = 29, EmailAddress = "luis.gonzalez@unosquare.com"},
-            };
-
             foreach (var person in People)
             {
                 person.PhotoUrl = GetGravatarUrl(person.EmailAddress);
@@ -39,23 +45,8 @@
 
         private static string GetGravatarUrl(string emailAddress)
         {
-            return string.Format("http://www.gravatar.com/avatar/{0}.png?s=100", HashMD5(emailAddress));
-        }
-
-        private static string HashMD5(string input)
-        {
-            // step 1, calculate MD5 hash from input
-            MD5 md5 = System.Security.Cryptography.MD5.Create();
-            byte[] inputBytes = System.Text.Encoding.ASCII.GetBytes(input);
-            byte[] hash = md5.ComputeHash(inputBytes);
-
-            // step 2, convert byte array to hex string
-            StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < hash.Length; i++)
-            {
-                sb.Append(hash[i].ToString("x2"));
-            }
-            return sb.ToString();
+            return string.Format("http://www.gravatar.com/avatar/{0}.png?s=100",
+                EmbedIO.Extensions.ComputeMd5Hash(emailAddress));
         }
 
         /// <summary>
@@ -116,9 +107,40 @@
                     // here the error handler will respond with a generic 500 HTTP code a JSON-encoded object
                     // with error info. You will need to handle HTTP status codes correctly depending on the situation.
                     // For example, for keys that are not found, ou will need to respond with a 404 status code.
-                    return HandleError(context, ex, (int)HttpStatusCode.InternalServerError);
+                    return HandleError(context, ex, (int) HttpStatusCode.InternalServerError);
                 }
+            }
 
+            /// <summary>
+            /// Posts the people Tubular model.
+            /// This will respond to 
+            ///     GET http://localhost:9696/api/people/
+            ///     GET http://localhost:9696/api/people/1
+            ///     GET http://localhost:9696/api/people/{n}
+            /// 
+            /// Notice the wildcard is important
+            /// </summary>
+            /// <param name="server">The server.</param>
+            /// <param name="context">The context.</param>
+            /// <returns></returns>
+            /// <exception cref="System.Collections.Generic.KeyNotFoundException">Key Not Found:  + lastSegment</exception>
+            [WebApiHandler(HttpVerbs.Post, RelativePath + "people/*")]
+            public async Task<bool> PostPeople(WebServer server, HttpListenerContext context)
+            {
+                try
+                {
+                    var model = context.ParseJson<GridDataRequest>();
+                    var data = await GetPeopleAsync();
+
+                    return context.JsonResponse(model.CreateGridDataResponse(data));
+                }
+                catch (Exception ex)
+                {
+                    // here the error handler will respond with a generic 500 HTTP code a JSON-encoded object
+                    // with error info. You will need to handle HTTP status codes correctly depending on the situation.
+                    // For example, for keys that are not found, ou will need to respond with a 404 status code.
+                    return HandleError(context, ex);
+                }
             }
 
             /// <summary>
@@ -140,10 +162,6 @@
                 context.Response.StatusCode = statusCode;
                 return context.JsonResponse(errorResponse);
             }
-
         }
-
-
-
     }
 }

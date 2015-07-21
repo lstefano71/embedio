@@ -16,17 +16,17 @@
         public static void Setup(WebServer server)
         {
             server.RegisterModule(new WebSocketsModule());
-            server.Module<WebSocketsModule>().RegisterWebSocketsServer<WebSocketsChatServer>("/chat");
-            server.Module<WebSocketsModule>().RegisterWebSocketsServer<WebSocketsTerminalServer>("/terminal");
+            server.Module<WebSocketsModule>().RegisterWebSocketsServer<WebSocketsChatServer>();
+            server.Module<WebSocketsModule>().RegisterWebSocketsServer<WebSocketsTerminalServer>();
         }
     }
 
     /// <summary>
     /// Defines a very simple chat server
     /// </summary>
+    [WebSocketHandler("/chat")]
     public class WebSocketsChatServer : WebSocketsServer
     {
-
         public WebSocketsChatServer()
             : base(true, 0)
         {
@@ -66,11 +66,11 @@
         /// <param name="context">The context.</param>
         protected override void OnClientConnected(WebSocketContext context)
         {
-            this.Send(context, "Welcome to the chat room!");
+            this.Send(context, "Welcome to the chat room!");    
             foreach (var ws in this.WebSockets)
             {
                 if (ws != context)
-                    this.Send(ws, "Someone joined the chat room.");
+                    this.Send(ws, "Someone joined the chat room."); 
             }
         }
 
@@ -98,6 +98,7 @@
     /// <summary>
     /// Define a command-line interface terminal
     /// </summary>
+    [WebSocketHandler("/terminal")]
     public class WebSocketsTerminalServer : WebSocketsServer
     {
 

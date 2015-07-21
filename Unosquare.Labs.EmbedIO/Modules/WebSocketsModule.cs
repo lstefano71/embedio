@@ -18,15 +18,19 @@
         /// <summary>
         /// Holds the collection of paths and WebSockets Servers registered
         /// </summary>
-        private readonly Dictionary<string, WebSocketsServer> ServerMap = new Dictionary<string, WebSocketsServer>(StringComparer.InvariantCultureIgnoreCase);
+        private readonly Dictionary<string, WebSocketsServer> _serverMap =
+            new Dictionary<string, WebSocketsServer>(StringComparer.InvariantCultureIgnoreCase);
 
+        /// <summary>
+        /// Initialize WebSocket module
+        /// </summary>
         public WebSocketsModule()
             : base()
         {
             this.AddHandler(ModuleMap.AnyPath, HttpVerbs.Any, (server, context) =>
             {
 
-                // check if it is a WebSocket request
+                // check if it is a WebSocket request (this only works with Win8 and Windows 2012)
                 if (context.Request.IsWebSocketRequest == false)
                     return false;
 
@@ -34,10 +38,10 @@
                 var path = context.RequestPath();
 
                 // match the request path
-                if (ServerMap.ContainsKey(path))
+                if (_serverMap.ContainsKey(path))
                 {
                     // Accept the WebSocket -- this is a blocking method until the WebSocketCloses
-                    ServerMap[path].AcceptWebSocket(server, context);
+                    _serverMap[path].AcceptWebSocket(server, context);
                     return true;
                 }
 
@@ -58,17 +62,98 @@
         }
 
         /// <summary>
-        /// Registers the web sockets server type.
+        /// Registers the web sockets server given a WebSocketsServer Type.
         /// </summary>
         /// <typeparam name="T"></typeparam>
-        /// <param name="path">The path. For example: '/echo' </param>
+        /// <exception cref="ArgumentException">Argument 'path' cannot be null;path</exception>
+        public void RegisterWebSocketsServer<T>()
+            where T : WebSocketsServer, new()
+        {
+            RegisterWebSocketsServer(typeof(T));
+        }
+
+        /// <summary>
+        /// Registers the web sockets server given a WebSocketsServer Type.
+        /// </summary>
+        /// <param name="socketType"></param>
+        /// <exception cref="ArgumentException">Argument 'socketType' cannot be null;socketType</exception>
+        public void RegisterWebSocketsServer(Type socketType)
+        {
+            if (socketType == null)
+                throw new ArgumentException("Argument 'socketType' cannot be null", "socketType");
+
+            var attribute =
+                socketType.GetCustomAttributes(typeof(WebSocketHandlerAttribute), true).FirstOrDefault() as
+                    WebSocketHandlerAttribute;
+
+            if (attribute == null)
+                throw new ArgumentException("Argument 'socketType' needs a WebSocketHandlerAttribute", "socketType");
+
+            this._serverMap[attribute.Path] = (WebSocketsServer)Activator.CreateInstance(socketType);
+        }
+
+        /// <summary>
+        /// Registers the web sockets server given a WebSocketsServer Type.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="path">The path. For example: '/echo'</param>
+        /// <exception cref="ArgumentException">Argument 'path' cannot be null;path</exception>
         public void RegisterWebSocketsServer<T>(string path)
             where T : WebSocketsServer, new()
         {
-            this.ServerMap[path] = Activator.CreateInstance<T>();
+            if (string.IsNullOrWhiteSpace(path))
+                throw new ArgumentException("Argument 'path' cannot be null", "path");
+
+            this._serverMap[path] = Activator.CreateInstance<T>();
+        }
+
+        /// <summary>
+        /// Registers the web sockets server.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="path">The path. For example: '/echo'</param>
+        /// <param name="server">The server.</param>
+        /// <exception cref="ArgumentException">Argument 'server' cannot be null;server</exception>
+        public void RegisterWebSocketsServer<T>(string path, T server)
+            where T : WebSocketsServer
+        {
+            if (string.IsNullOrWhiteSpace(path))
+                throw new ArgumentException("Argument 'path' cannot be null", "path");
+            if (server == null)
+                throw new ArgumentException("Argument 'server' cannot be null", "server");
+
+            this._serverMap[path] = server;
         }
     }
 
+    /// <summary>
+    /// Decorate methods within controllers with this attribute in order to make them callable from the Web API Module
+    /// Method Must match the WebServerModule.
+    /// </summary>
+    [AttributeUsage(AttributeTargets.Class, AllowMultiple = false)]
+    public sealed class WebSocketHandlerAttribute : Attribute
+    {
+        /// <summary>
+        /// Initializes a new instance of the <see cref="WebSocketHandlerAttribute"/> class.
+        /// </summary>
+        /// <param name="path">The path.</param>
+        /// <exception cref="System.ArgumentException">The argument 'paths' must be specified.</exception>
+        public WebSocketHandlerAttribute(string path)
+        {
+            if (path == null || string.IsNullOrWhiteSpace(path))
+                throw new ArgumentException("The argument 'path' must be specified.");
+
+            this.Path = path;
+        }
+
+        /// <summary>
+        /// Gets or sets the path.
+        /// </summary>
+        /// <value>
+        /// The paths.
+        /// </value>
+        public string Path { get; private set; }
+    }
 
     /// <summary>
     /// A base class that defines how to handle WebSockets connections.
@@ -77,11 +162,15 @@
     /// </summary>
     public abstract class WebSocketsServer : IDisposable
     {
-        private bool isDisposing = false;
-        private bool enableDisconnectedSocketColletion = false;
-        private int maximumMessageSize = 0;
-        private readonly object SyncRoot = new object();
-        private readonly List<WebSocketContext> m_WebSockets = new List<WebSocketContext>(10);
+        private bool _isDisposing;
+        private readonly bool _enableDisconnectedSocketColletion;
+        private readonly int _maximumMessageSize;
+        private readonly object _syncRoot = new object();
+        private readonly List<WebSocketContext> _mWebSockets = new List<WebSocketContext>(10);
+
+        /// <summary>
+        /// WebServer internal instance
+        /// </summary>
         public WebServer WebServer { get; protected set; }
 
         /// <summary>
@@ -94,9 +183,9 @@
         {
             get
             {
-                lock (SyncRoot)
+                lock (_syncRoot)
                 {
-                    return new ReadOnlyCollection<WebSocketContext>(m_WebSockets);
+                    return new ReadOnlyCollection<WebSocketContext>(_mWebSockets);
                 }
             }
         }
@@ -106,18 +195,18 @@
         /// </summary>
         /// <param name="enableConnectionWatchdog">if set to <c>true</c> [enable connection watchdog].</param>
         /// <param name="maxMessageSize">Maximum size of the message in bytes. Enter 0 or negative number to prevent checks.</param>
-        public WebSocketsServer(bool enableConnectionWatchdog, int maxMessageSize)
-            : base()
+        protected WebSocketsServer(bool enableConnectionWatchdog, int maxMessageSize)
         {
-            this.enableDisconnectedSocketColletion = enableConnectionWatchdog;
-            this.maximumMessageSize = maxMessageSize;
-            this.RunConnectionWatchdog();
+            this._enableDisconnectedSocketColletion = enableConnectionWatchdog;
+            this._maximumMessageSize = maxMessageSize;
+            
+            RunConnectionWatchdog();
         }
 
         /// <summary>
         /// Initializes a new instance of the <see cref="WebSocketsServer"/> class. With dead connection watchdog and no message size checks.
         /// </summary>
-        public WebSocketsServer()
+        protected WebSocketsServer()
             : this(true, 0)
         {
             // placeholder
@@ -131,13 +220,13 @@
         {
             var t = new Thread(() =>
             {
-                while (isDisposing == false)
+                while (_isDisposing == false)
                 {
-                    if (isDisposing == false)
+                    if (_isDisposing == false)
                         CollectDisconnected();
 
                     // TODO: make this sleep configurable.
-                    System.Threading.Thread.Sleep(30 * 1000);
+                    Thread.Sleep(30 * 1000);
                 }
             })
             {
@@ -145,7 +234,7 @@
                 Priority = ThreadPriority.BelowNormal
             };
 
-            if (enableDisconnectedSocketColletion)
+            if (_enableDisconnectedSocketColletion)
                 t.Start();
         }
 
@@ -157,28 +246,33 @@
         /// <param name="context">The context.</param>
         public void AcceptWebSocket(WebServer server, HttpListenerContext context)
         {
-
             // first, accept the websocket
             this.WebServer = server;
             server.Log.DebugFormat("{0} - Accepting WebSocket . . .", this.ServerName);
-            var webSocketContext = context.AcceptWebSocketAsync(subProtocol: null, keepAliveInterval: TimeSpan.FromSeconds(30)).GetAwaiter().GetResult();
+            const int receiveBufferSize = 2048;
+            var webSocketContext =
+                context.AcceptWebSocketAsync(subProtocol: null, receiveBufferSize: receiveBufferSize,
+                    keepAliveInterval: TimeSpan.FromSeconds(30))
+                    .GetAwaiter()
+                    .GetResult();
 
             // remove the disconnected clients
             this.CollectDisconnected();
-            lock (SyncRoot)
+            lock (_syncRoot)
             {
                 // add the newly-connected client
-                m_WebSockets.Add(webSocketContext);
+                _mWebSockets.Add(webSocketContext);
             }
 
-            server.Log.DebugFormat("{0} - WebSocket Accepted - There are " + WebSockets.Count + " sockets connected.", this.ServerName);
+            server.Log.DebugFormat("{0} - WebSocket Accepted - There are " + WebSockets.Count + " sockets connected.",
+                this.ServerName);
             // call the abstract member
             this.OnClientConnected(webSocketContext);
 
             try
             {
                 // define a receive buffer
-                var receiveBuffer = new byte[2048];
+                var receiveBuffer = new byte[receiveBufferSize];
                 // define a dynamic buffer that holds multi-part receptions
                 var receivedMessage = new List<byte>(receiveBuffer.Length * 2);
 
@@ -186,11 +280,14 @@
                 while (webSocketContext.WebSocket.State == WebSocketState.Open)
                 {
                     // retrieve the result (blocking)
-                    var receiveResult = webSocketContext.WebSocket.ReceiveAsync(new ArraySegment<byte>(receiveBuffer), CancellationToken.None).GetAwaiter().GetResult();
+                    var receiveResult =
+                        webSocketContext.WebSocket.ReceiveAsync(new ArraySegment<byte>(receiveBuffer),
+                            CancellationToken.None).GetAwaiter().GetResult();
                     if (receiveResult.MessageType == WebSocketMessageType.Close)
                     {
                         // close the connection if requested by the client
-                        webSocketContext.WebSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, CancellationToken.None).GetAwaiter().GetResult();
+                        webSocketContext.WebSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty,
+                            CancellationToken.None).GetAwaiter().GetResult();
                         return;
                     }
 
@@ -201,12 +298,12 @@
                     // add the response to the multi-part response
                     receivedMessage.AddRange(frameBytes);
 
-                    if (receivedMessage.Count > maximumMessageSize && maximumMessageSize > 0)
+                    if (receivedMessage.Count > _maximumMessageSize && _maximumMessageSize > 0)
                     {
                         // close the connection if message excceeds max length
                         webSocketContext.WebSocket.CloseAsync(
                             WebSocketCloseStatus.MessageTooBig,
-                            string.Format("Message too big. Maximum is {0} bytes.", maximumMessageSize),
+                            string.Format("Message too big. Maximum is {0} bytes.", _maximumMessageSize),
                             CancellationToken.None).GetAwaiter().GetResult();
 
                         // exit the loop; we're done
@@ -241,12 +338,12 @@
             if (webSocketContext.WebSocket != null)
                 webSocketContext.WebSocket.Dispose();
 
-            lock (SyncRoot)
+            lock (_syncRoot)
             {
-                m_WebSockets.Remove(webSocketContext);
+                _mWebSockets.Remove(webSocketContext);
             }
 
-            this.OnClientDisconnected(webSocketContext);
+            OnClientDisconnected(webSocketContext);
         }
 
         /// <summary>
@@ -256,11 +353,11 @@
         private int CollectDisconnected()
         {
             var collectedCount = 0;
-            lock (SyncRoot)
+            lock (_syncRoot)
             {
-                for (var i = this.m_WebSockets.Count - 1; i >= 0; i--)
+                for (var i = this._mWebSockets.Count - 1; i >= 0; i--)
                 {
-                    var currentSocket = this.m_WebSockets[i];
+                    var currentSocket = this._mWebSockets[i];
                     if (currentSocket.WebSocket != null && currentSocket.WebSocket.State != WebSocketState.Open)
                     {
                         RemoveWebSocket(currentSocket);
@@ -271,11 +368,11 @@
             }
 
             if (this.WebServer != null)
-                this.WebServer.Log.DebugFormat("{0} - Collected {1} sockets. WebSocket Count: {2}", this.ServerName, collectedCount, this.WebSockets.Count);
+                this.WebServer.Log.DebugFormat("{0} - Collected {1} sockets. WebSocket Count: {2}", this.ServerName,
+                    collectedCount, this.WebSockets.Count);
 
             return collectedCount;
         }
-
 
         /// <summary>
         /// Sends a UTF-8 payload
@@ -288,13 +385,14 @@
             {
                 if (payload == null) payload = string.Empty;
                 var buffer = System.Text.Encoding.UTF8.GetBytes(payload);
-                await webSocket.WebSocket.SendAsync(new ArraySegment<byte>(buffer), WebSocketMessageType.Text, true, CancellationToken.None);
+                await
+                    webSocket.WebSocket.SendAsync(new ArraySegment<byte>(buffer), WebSocketMessageType.Text, true,
+                        CancellationToken.None);
             }
             catch (Exception ex)
             {
                 WebServer.Log.Error(ex);
             }
-
         }
 
         /// <summary>
@@ -307,7 +405,9 @@
             try
             {
                 if (payload == null) payload = new byte[0];
-                await webSocket.WebSocket.SendAsync(new ArraySegment<byte>(payload), WebSocketMessageType.Binary, true, CancellationToken.None);
+                await
+                    webSocket.WebSocket.SendAsync(new ArraySegment<byte>(payload), WebSocketMessageType.Binary, true,
+                        CancellationToken.None);
             }
             catch (Exception ex)
             {
@@ -347,13 +447,14 @@
 
             try
             {
-                await webSocket.WebSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty, CancellationToken.None);
+                await
+                    webSocket.WebSocket.CloseAsync(WebSocketCloseStatus.NormalClosure, string.Empty,
+                        CancellationToken.None);
             }
             finally
             {
                 RemoveWebSocket(webSocket);
             }
-
         }
 
         /// <summary>
@@ -362,7 +463,8 @@
         /// <param name="context">The context.</param>
         /// <param name="rxBuffer">The rx buffer.</param>
         /// <param name="rxResult">The rx result.</param>
-        protected abstract void OnMessageReceived(WebSocketContext context, byte[] rxBuffer, WebSocketReceiveResult rxResult);
+        protected abstract void OnMessageReceived(WebSocketContext context, byte[] rxBuffer,
+            WebSocketReceiveResult rxResult);
 
         /// <summary>
         /// Called when this WebSockets Server receives a message frame regardless if the frame represents the EndOfMessage.
@@ -370,7 +472,8 @@
         /// <param name="context">The context.</param>
         /// <param name="rxBuffer">The rx buffer.</param>
         /// <param name="rxResult">The rx result.</param>
-        protected abstract void OnFrameReceived(WebSocketContext context, byte[] rxBuffer, WebSocketReceiveResult rxResult);
+        protected abstract void OnFrameReceived(WebSocketContext context, byte[] rxBuffer,
+            WebSocketReceiveResult rxResult);
 
         /// <summary>
         /// Called when this WebSockets Server accepts a new WebSockets client.
@@ -389,10 +492,25 @@
         /// </summary>
         public void Dispose()
         {
-            if (isDisposing) return;
-            isDisposing = true;
+            if (this._isDisposing == false)
+            {
+                this._isDisposing = true;
+                this.Dispose(true);
+                GC.SuppressFinalize(this);
+            }
+        }
 
-            foreach (var webSocket in this.m_WebSockets)
+        /// <summary>
+        /// Releases unmanaged and - optionally - managed resources.
+        /// </summary>
+        /// <param name="disposeAll"><c>true</c> to release both managed and unmanaged resources; <c>false</c> to release only unmanaged resources.</param>
+        protected virtual void Dispose(bool disposeAll)
+        {
+            // We only have managed resources here.
+            // if called with false, return.
+            if (disposeAll == false) return;
+
+            foreach (var webSocket in this._mWebSockets)
             {
                 Close(webSocket);
             }

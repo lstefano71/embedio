@@ -4,6 +4,7 @@
     using System.Collections.Generic;
     using System.Linq;
     using System.Reflection;
+    using System.Threading.Tasks;
     using Unosquare.Labs.EmbedIO;
 
     /// <summary>
@@ -14,8 +15,11 @@
     public class WebApiModule : WebModuleBase
     {
         private readonly List<Type> ControllerTypes = new List<Type>();
-        private readonly Dictionary<string, Dictionary<HttpVerbs, Tuple<Type, MethodInfo>>> DelegateMap
-            = new Dictionary<string, Dictionary<HttpVerbs, Tuple<Type, MethodInfo>>>(StringComparer.InvariantCultureIgnoreCase);
+
+        private readonly Dictionary<string, Dictionary<HttpVerbs, Tuple<Func<object>, MethodInfo>>> DelegateMap
+            =
+            new Dictionary<string, Dictionary<HttpVerbs, Tuple<Func<object>, MethodInfo>>>(
+                StringComparer.InvariantCultureIgnoreCase);
 
         /// <summary>
         /// Initializes a new instance of the <see cref="WebApiModule"/> class.
@@ -23,10 +27,8 @@
         public WebApiModule()
             : base()
         {
-
             this.AddHandler(ModuleMap.AnyPath, HttpVerbs.Any, (server, context) =>
             {
-
                 var path = context.RequestPath();
                 var verb = context.RequestVerb();
                 var wildcardPaths = DelegateMap.Keys
@@ -55,14 +57,31 @@
                 }
 
                 var methodPair = DelegateMap[path][verb];
+                var controller = methodPair.Item1();
 
-                var controller = Activator.CreateInstance(methodPair.Item1);
-                var method = Delegate.CreateDelegate(typeof(ResponseHandler), controller, methodPair.Item2);
+                if (methodPair.Item2.ReturnType == typeof(Task<bool>))
+                {
+                    var method = Delegate.CreateDelegate(typeof(AsyncResponseHandler), controller, methodPair.Item2);
 
-                server.Log.DebugFormat("Handler: {0}.{1}", method.Method.DeclaringType.FullName, method.Method.Name);
-                context.NoCache();
-                var returnValue = (bool)method.DynamicInvoke(server, context);
-                return returnValue;
+                    server.Log.DebugFormat("Handler: {0}.{1}", method.Method.DeclaringType.FullName, method.Method.Name);
+                    context.NoCache();
+                    var returnValue = Task.Run(async () =>
+                    {
+                        var task = await (Task<bool>)method.DynamicInvoke(server, context);
+                        return task;
+                    });
+
+                    return returnValue.Result;
+                }
+                else
+                {
+                    var method = Delegate.CreateDelegate(typeof(ResponseHandler), controller, methodPair.Item2);
+
+                    server.Log.DebugFormat("Handler: {0}.{1}", method.Method.DeclaringType.FullName, method.Method.Name);
+                    context.NoCache();
+                    var returnValue = (bool)method.DynamicInvoke(server, context);
+                    return returnValue;
+                }
             });
         }
 
@@ -78,6 +97,14 @@
         }
 
         /// <summary>
+        /// Gets the controllers count
+        /// </summary>
+        public int ControllersCount
+        {
+            get { return ControllerTypes.Count; }
+        }
+
+        /// <summary>
         /// Registers the controller.
         /// </summary>
         /// <typeparam name="T"></typeparam>
@@ -88,28 +115,71 @@
             if (ControllerTypes.Contains(typeof(T)))
                 throw new ArgumentException("Controller types must be unique within the module");
 
-            var protoDelegate = new ResponseHandler((server, context) => { return true; });
+            RegisterController(typeof(T));
+        }
 
-            var methods = typeof(T).GetMethods(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.Public)
-                .Where(m => m.ReturnType == protoDelegate.Method.ReturnType
-                    && m.GetParameters().Select(pi => pi.ParameterType)
-                    .SequenceEqual(protoDelegate.Method.GetParameters()
-                    .Select(pi => pi.ParameterType)));
+        /// <summary>
+        /// Registers the controller.
+        /// </summary>
+        /// <typeparam name="T"></typeparam>
+        /// <param name="controllerFactory"></param>
+        /// <exception cref="System.ArgumentException">Controller types must be unique within the module</exception>
+        public void RegisterController<T>(Func<T> controllerFactory)
+            where T : WebApiController
+        {
+            if (ControllerTypes.Contains(typeof(T)))
+                throw new ArgumentException("Controller types must be unique within the module");
+
+            RegisterController(typeof(T), controllerFactory);
+        }
+
+        /// <summary>
+        /// Registers the controller.
+        /// </summary>
+        /// <param name="controllerType">Type of the controller.</param>
+        public void RegisterController(Type controllerType)
+        {
+            Func<object> controllerFactory = () => Activator.CreateInstance(controllerType);
+            this.RegisterController(controllerType, controllerFactory);
+        }
+
+
+        /// <summary>
+        /// Registers the controller.
+        /// </summary>
+        /// <param name="controllerType">Type of the controller.</param>
+        /// <param name="controllerFactory">The controller factory method.</param>
+        public void RegisterController(Type controllerType, Func<object> controllerFactory)
+        {
+            var protoDelegate = new ResponseHandler((server, context) => true);
+            var protoAsyncDelegate = new AsyncResponseHandler((server, context) => Task.FromResult(true));
+
+            var methods = controllerType
+                .GetMethods(BindingFlags.Instance | BindingFlags.Public)
+                .Where(
+                    m => (m.ReturnType == protoDelegate.Method.ReturnType
+                         || m.ReturnType == protoAsyncDelegate.Method.ReturnType)
+                         && m.GetParameters()
+                            .Select(pi => pi.ParameterType)
+                            .SequenceEqual(protoDelegate.Method.GetParameters()
+                            .Select(pi => pi.ParameterType)));
 
             foreach (var method in methods)
             {
-                var attribute = method.GetCustomAttributes(typeof(WebApiHandlerAttribute), true).FirstOrDefault() as WebApiHandlerAttribute;
+                var attribute =
+                    method.GetCustomAttributes(typeof(WebApiHandlerAttribute), true).FirstOrDefault() as
+                        WebApiHandlerAttribute;
                 if (attribute == null) continue;
 
                 foreach (var path in attribute.Paths)
                 {
-                    var delegatePath = new Dictionary<HttpVerbs, Tuple<Type, MethodInfo>>();
+                    var delegatePath = new Dictionary<HttpVerbs, Tuple<Func<object>, MethodInfo>>();
                     if (DelegateMap.ContainsKey(path))
                         delegatePath = DelegateMap[path]; // update
                     else
                         DelegateMap.Add(path, delegatePath); // add
 
-                    var delegatePair = new Tuple<Type, MethodInfo>(typeof(T), method);
+                    var delegatePair = new Tuple<Func<object>, MethodInfo>(controllerFactory, method);
                     if (DelegateMap[path].ContainsKey(attribute.Verb))
                         DelegateMap[path][attribute.Verb] = delegatePair; // update
                     else
@@ -117,10 +187,8 @@
                 }
             }
 
-            ControllerTypes.Add(typeof(T));
-
+            ControllerTypes.Add(controllerType);
         }
-
     }
 
     /// <summary>
@@ -153,7 +221,7 @@
         /// <exception cref="System.ArgumentException">The argument 'path' must be specified.</exception>
         public WebApiHandlerAttribute(HttpVerbs verb, string path)
         {
-            if (path == null || string.IsNullOrWhiteSpace(path))
+            if (string.IsNullOrWhiteSpace(path))
                 throw new ArgumentException("The argument 'path' must be specified.");
 
             this.Verb = verb;
